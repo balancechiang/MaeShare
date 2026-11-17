@@ -1,0 +1,23 @@
+MaeShare
+Copyright 2026 Chih
+
+MaeShare is a LocalSend-compatible client for the Nokia N900 / Maemo 5 (Fremantle).
+UI, Maemo integration plugin and packaging: Apache License 2.0.
+
+LocalSend protocol and the random-name dictionaries: LocalSend project and contributors
+(Apache-2.0). No official LocalSend logo is included in this release.
+
+Network core (probe): derived from MeeShare / ChengChihz-MeeGo-Share
+(Copyright 2026 Chih, Apache-2.0), adapted and extended for Fremantle.
+
+Mbed TLS 3.6.7: Mbed TLS contributors; Apache-2.0 option selected.
+QJson: Flavio Castelli and other contributors; GNU Library General Public License
+version 2 or later. Source copy obtained from glKarin/weibomm; original file notices
+are retained.
+Qt 4.7 and Qt Quick 1: runtime libraries supplied by the device; their licenses remain
+unchanged.
+libsharing / sharing-manager: Nokia device framework, dynamically loaded at runtime;
+its license remains unchanged.
+
+MaeShare is an independent compatible implementation, not affiliated with or endorsed
+by the LocalSend project.

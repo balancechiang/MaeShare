@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 部署到 /usr/share/sharing/services/maeshare.service.xml
+     要点（真机实测，别照网上的 <mimetypes>/<capabilities>/<account-required> 写）：
+     1) 根元素是 <service plugin=.. provider=..>，插件名就是 /usr/lib/sharing/plugins/ 下的 .so 文件名；
+     2) 账号段是 <accounts>，属性 plugInSetup/plugInEdit 表示「建号/编辑都交给插件自己」；
+        type/realm 用 signond 真机确实存在的插件类型（password / dummy / NokiaAccount），
+        写不存在的 type 会让账号向导直接把这个服务过滤掉；
+     3) 界面段 <ui> 里 name 是显示名，icon type="post"/"setup" 指向 /usr/share/icons 里的图标名；
+     4) 媒体段 <media tags="1"><types><mime>..</mime></types></media>，没有 tags 服务不接收多选。
+-->
+<service plugin="libmaeshare.so" provider="maeshare">
+    <accounts type="password" realm="maeshare" plugInSetup="1" plugInEdit="1">
+    </accounts>
+    <ui>
+        <name>MaeShare</name>
+        <icon type="post">sharing_maeshare</icon>
+        <icon type="setup">sharing_maeshare</icon>
+    </ui>
+    <media tags="1"><types><mime>image/jpeg</mime><mime>image/png</mime></types></media>
+</service>

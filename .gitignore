@@ -1,0 +1,16 @@
+# build output
+build/
+*.o
+*.so
+moc_*.cpp
+moc_*.h
+
+# packages built locally (release assets are not committed)
+*.deb
+dist/
+
+# editor / OS cruft
+*.bak
+*.bak-*
+.DS_Store
+Thumbs.db
