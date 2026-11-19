@@ -32,6 +32,15 @@ Rectangle {
     property bool receiveHistoryOpen: false
     property bool receiveInfoOpen: false
 
+    // 相册「分享到 MaeShare」：文件已进入已选列表，直接切到发送页并重新扫一遍设备
+    Connections {
+        target: transfer
+        onShareReady: {
+            app.goTab("send");
+            transfer.scan();
+        }
+    }
+
     // ------------------------------------------------------------- 语言
     // langTag："system" 或具体语言；tlang：实际生效的语言目录
     property string langTag: transfer.language.length > 0 ? transfer.language : "system"
@@ -665,7 +674,7 @@ Rectangle {
             Row {
                 id: cardRow
                 x: 0
-                y: 34
+                y: 30
                 width: parent.width
                 spacing: 12
 
@@ -698,21 +707,85 @@ Rectangle {
                 }
             }
 
-            Text {
-                x: 2
-                y: 128
+            // 已选内容摘要：原来是一行裸文字，清除动作沉在左下角，和内容脱节。
+            // 现在收成一条可读的状态条，清除/取消就落在条内右侧。
+            Rectangle {
+                id: selBar
+                x: 0
+                y: 124
                 width: parent.width
-                height: 24
-                text: transfer.selectedCount > 0 ? I.t(app.langFamily(), transfer.selectedSummary) : app.tx("send_hint")
-                color: transfer.selectedCount > 0 ? "#FFFFFF" : app.textMuted
-                font.pixelSize: 18
-                elide: Text.ElideRight
-                verticalAlignment: Text.AlignVCenter
+                height: 56
+                radius: 14
+                smooth: true
+                color: "#252932"
+                visible: transfer.selectedCount > 0
+
+                Image {
+                    id: selTile
+                    anchors.left: parent.left
+                    anchors.leftMargin: 14
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 24
+                    height: 24
+                    smooth: true
+                    fillMode: Image.PreserveAspectFit
+                    source: "icons/file-document.svg"
+                }
+
+                Text {
+                    id: selName
+                    anchors.left: selTile.right
+                    anchors.leftMargin: 12
+                    anchors.right: selCount.left
+                    anchors.rightMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: I.t(app.langFamily(), transfer.selectedSummary)
+                    color: "#FFFFFF"
+                    font.pixelSize: 17
+                    font.bold: true
+                    elide: Text.ElideMiddle
+                }
+
+                Text {
+                    id: selCount
+                    anchors.right: selClear.left
+                    anchors.rightMargin: 10
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: transfer.selectedCount === 1
+                    text: app.tx("sel_one")
+                    color: app.textMuted
+                    font.pixelSize: 15
+                }
+
+                Item {
+                    id: selClear
+                    anchors.right: parent.right
+                    anchors.rightMargin: 2
+                    height: parent.height
+                    width: selClearLabel.width + 28
+
+                    Text {
+                        id: selClearLabel
+                        anchors.centerIn: parent
+                        text: transfer.busy ? app.tx("send_cancel") : app.tx("send_clear")
+                        color: selClearMouse.pressed ? "#FFFFFF" : app.textMuted
+                        font.pixelSize: 16
+                    }
+
+                    MouseArea {
+                        id: selClearMouse
+                        anchors.fill: parent
+                        onClicked: {
+                            if (transfer.busy) transfer.cancel();
+                            else transfer.clearSelection();
+                        }
+                    }
+                }
             }
 
             Row {
                 x: 0
-                y: 158
+                y: 184
                 spacing: 6
 
                 Text {
@@ -770,9 +843,9 @@ Rectangle {
             // 内容还没选：设备列表先不出现，避免「先选设备」的旧习惯
             Rectangle {
                 x: 0
-                y: 206
+                y: 246
                 width: parent.width
-                height: 118
+                height: 104
                 radius: 16
                 smooth: true
                 color: "#22262B"
@@ -791,7 +864,7 @@ Rectangle {
 
             Text {
                 x: 0
-                y: 212
+                y: 252
                 width: parent.width
                 visible: transfer.selectedCount > 0 && transfer.devices.length === 0
                 horizontalAlignment: Text.AlignHCenter
@@ -804,9 +877,9 @@ Rectangle {
             ListView {
                 id: deviceList
                 x: 0
-                y: 206
+                y: 246
                 width: parent.width
-                height: 168
+                height: parent.height - 246
                 clip: true
                 spacing: 8
                 visible: transfer.selectedCount > 0 || previewTab === 21
@@ -827,21 +900,13 @@ Rectangle {
                         anchors.rightMargin: 14
                         spacing: 12
 
-                        Rectangle {
-                            width: 48
-                            height: 48
-                            radius: 12
-                            color: "#333E3B"
+                        Image {
+                            width: 34
+                            height: 34
+                            smooth: true
+                            fillMode: Image.PreserveAspectFit
                             anchors.verticalCenter: parent.verticalCenter
-
-                            Image {
-                                anchors.centerIn: parent
-                                width: 30
-                                height: 30
-                                smooth: true
-                                fillMode: Image.PreserveAspectFit
-                                source: app.deviceIcon(modelData.deviceType)
-                            }
+                            source: app.deviceIcon(modelData.deviceType)
                         }
 
                         Column {
@@ -894,17 +959,6 @@ Rectangle {
             }
 
             // 不再需要单独的发发送键：选好内容后点设备就直接发
-            FsChip {
-                x: 0
-                anchors.bottom: parent.bottom
-                anchors.bottomMargin: 4
-                text: transfer.busy ? app.tx("send_cancel") : app.tx("send_clear")
-                visible: transfer.busy || transfer.selectedCount > 0
-                onClicked: {
-                    if (transfer.busy) transfer.cancel();
-                    else transfer.clearSelection();
-                }
-            }
         }
     }
 
@@ -973,23 +1027,52 @@ Rectangle {
                             wrapMode: TextEdit.Wrap
                             selectByMouse: true
                             focus: true
+                            // 页面切入时显式抢焦点：只写 focus: true 时这台机器上
+                            // scene 没有焦点项，键盘（和中文输入面板）都不会出现。
+                            Component.onCompleted: forceActiveFocus()
                         }
+                    }
+
+                    // 没焦点时点一下把焦点交进去；已经有焦点就关掉这层，
+                    // 免得挡住 TextEdit 的光标定位和 Flickable 的拖动。
+                    MouseArea {
+                        anchors.fill: parent
+                        enabled: !textEdit.activeFocus
+                        onClicked: textEdit.forceActiveFocus()
                     }
                 }
 
-                FsChip {
-                    id: textClearChip
+                Row {
+                    id: textChipRow
                     anchors.top: textBox.bottom
                     anchors.topMargin: 8
-                    text: app.tx("send_clear")
-                    visible: textEdit.text.length > 0 && !transfer.busy
-                    onClicked: textEdit.text = ""
+                    spacing: 10
+
+                    FsChip {
+                        id: textClearChip
+                        text: app.tx("send_clear")
+                        visible: textEdit.text.length > 0 && !transfer.busy
+                        onClicked: textEdit.text = ""
+                    }
+                    FsChip {
+                        text: app.tx("paste")
+                        visible: !transfer.busy
+                        onClicked: {
+                            // 中文靠键盘打不出来时，从剪贴板整段贴进来
+                            var t = transfer.clipboardText();
+                            if (t.length > 0) {
+                                textEdit.text = textEdit.text.length > 0
+                                        ? textEdit.text + "\n" + t : t;
+                            }
+                            textEdit.forceActiveFocus();
+                        }
+                    }
                 }
 
                 Text {
                     id: textDeviceLabel
                     anchors.left: parent.left
-                    anchors.top: textClearChip.bottom
+                    anchors.top: textChipRow.bottom
                     anchors.topMargin: 10
                     text: app.tx("text_pick_device")
                     color: app.textMain
@@ -1055,7 +1138,10 @@ Rectangle {
                 }
 
                 Text {
-                    anchors.centerIn: parent
+                    anchors.top: textDeviceLabel.bottom
+                    anchors.topMargin: 26
+                    anchors.left: parent.left
+                    anchors.right: parent.right
                     width: parent.width - 40
                     horizontalAlignment: Text.AlignHCenter
                     visible: !transfer.busy && transfer.devices.length === 0
@@ -1581,6 +1667,7 @@ Rectangle {
                     id: nameField
                     width: parent.width
                     maximumLength: 50
+                    autoFocus: true
                     text: transfer.localName
                 }
                 Row {
@@ -1598,6 +1685,17 @@ Rectangle {
                     FsChip {
                         text: app.tx("name_restore")
                         onClicked: nameField.text = transfer.localName
+                    }
+                    FsChip {
+                        text: app.tx("paste")
+                        onClicked: {
+                            // 键盘不可用时的兜底：从剪贴板取名字。
+                            // 必须写 inputItem.text：text 是 alias 且上面挂着
+                            // transfer.localName 的绑定，直接赋值会被绑定挡掉。
+                            var t = transfer.clipboardText();
+                            if (t.length > 0) nameField.inputItem.text = t.substring(0, 50);
+                            nameField.inputItem.forceActiveFocus();
+                        }
                     }
                 }
                 Text {
@@ -1644,9 +1742,9 @@ Rectangle {
                     id: manualField
                     width: 448
                     maximumLength: 15
+                    autoFocus: true
                     text: transfer.host
                     onTextChanged: transfer.host = text
-                    Component.onCompleted: inputItem.focus = true
                 }
 
                 Row {
@@ -1665,6 +1763,21 @@ Rectangle {
                             manualField.inputItem.focus = false;
                             transfer.connectManual(manualField.text);
                             app.goBack();
+                        }
+                    }
+                    FsChip {
+                        text: app.tx("paste")
+                        onClicked: {
+                            var t = transfer.clipboardText();
+                            // QML 里 QString 已被转成普通 JS 字符串，没有 QString 的方法，
+                            // 所以用 JS 原生 replace 去掉首尾空白
+                            t = t.replace(/^\s+/, "").replace(/\s+$/, "");
+                            // 只取第一行，避免把整段文字当成地址
+                            var nl = t.indexOf("\n");
+                            if (nl >= 0) t = t.substring(0, nl);
+                            // 同名字页：text 上挂着 transfer.host 的绑定，写 inputItem
+                            if (t.length > 0) manualField.inputItem.text = t;
+                            manualField.inputItem.forceActiveFocus();
                         }
                     }
                 }

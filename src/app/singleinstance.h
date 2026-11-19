@@ -22,9 +22,9 @@ class SingleInstance : public QObject {
     bool activateExisting() {
         QLocalSocket socket;
         socket.connectToServer(name);
-        if (!socket.waitForConnected(200)) return false;
+        if (!socket.waitForConnected(500)) return false;
         socket.write("activate\n");
-        socket.waitForBytesWritten(200);
+        socket.waitForBytesWritten(400);
         socket.disconnectFromServer();
         return true;
     }
@@ -46,15 +46,18 @@ public:
         return false;
     }
 
+    // 只问「现在有没有实例在跑」，不 listen、不建窗口
+    bool connectExisting() { return activateExisting(); }
+
     // 把「相册分享」的文件列表转给已在运行的实例；成功返回 true
     bool forwardShare(const QStringList &paths) {
         QLocalSocket socket;
         socket.connectToServer(name);
-        if (!socket.waitForConnected(200)) return false;
+        if (!socket.waitForConnected(500)) return false;
         for (int i = 0; i < paths.size(); ++i)
             socket.write(QString("share:%1\n").arg(paths.at(i)).toUtf8());
         socket.write("activate\n");
-        socket.waitForBytesWritten(300);
+        socket.waitForBytesWritten(600);
         socket.disconnectFromServer();
         return true;
     }

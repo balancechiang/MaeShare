@@ -13,6 +13,7 @@
 #include <QTimer>
 #include <QCoreApplication>
 #include <QUrl>
+#include <QGraphicsItem>   // rootObject() 返回 QGraphicsObject*，需要完整类型才能转 QObject*
 #include <QDeclarativeView>
 #include <QDeclarativeContext>
 #include <QDeclarativeEngine>
@@ -23,6 +24,49 @@
 #include <QDateTime>
 #include "transfer.h"
 #include "singleinstance.h"
+
+#include <stdio.h>
+#include <string.h>
+#include <signal.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <dirent.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+
+/*
+ * 早期转交：把 --share 的文件交给已在运行的实例，然后本进程直接退出。
+ * 这里刻意不构造 QApplication —— N900 上光是 Qt GUI 初始化就要 30 秒以上，
+ * 从相册点「分享」等这么久，看起来就是「拉不起来」。
+ * socket 路径必须和 SingleInstance 的 QLocalServer 名字一致：
+ *   TMPDIR=/var/tmp + name="chih-localsend-maemo-<uid>"
+ */
+static bool forwardToRunningInstance(const char **paths, int count)
+{
+    char sockPath[128];
+    struct sockaddr_un addr;
+    char line[1200];
+    int fd, i;
+
+    snprintf(sockPath, sizeof(sockPath), "/var/tmp/chih-localsend-maemo-%d", (int)getuid());
+    fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0) return false;
+
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, sockPath, sizeof(addr.sun_path) - 1);
+    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+        close(fd);
+        return false;          /* 没有实例在跑，走正常启动 */
+    }
+    for (i = 0; i < count; ++i) {
+        snprintf(line, sizeof(line), "share:%s\n", paths[i]);
+        if (write(fd, line, strlen(line)) < 0) break;
+    }
+    write(fd, "activate\n", 9);
+    close(fd);
+    return true;
+}
 
 // 相册分享的暂存副本由 transfer 在发送结束时删除；只有客户端崩溃 / 断电才会留下。
 // 这里启动时按 7 天 TTL 兜底清一次，并跳过本次 --share 传进来的文件。
@@ -47,6 +91,53 @@ static void sweepShareStaging(const QStringList &keep) {
             if (list.at(j).lastModified().secsTo(now) > ttl) QFile::remove(path);
         }
     }
+}
+
+// 客户端被 kill -9 / 崩溃时，probe 子进程会变成孤儿继续占着 UDP 53317，
+// 导致新实例的 probe 绑不上端口、界面永远停在 "Looking for devices"。
+// 这里只清理「argv[0] 恰好是自己目录下的 probe、且第一个参数是 --serve」的进程：
+// 按完整路径比对，绝不会命中同名但不同路径的程序（例如 /opt/n900store-native/probe）。
+// 另外先确认没有别的 MaeShare 实例在跑，避免误杀正在服务的那一只 probe。
+static void sweepStaleProbe()
+{
+    char exe[256], probePath[300];
+    ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+    if (n <= 0) return;
+    exe[n] = 0;
+    char *slash = strrchr(exe, '/');
+    if (!slash) return;
+    *slash = 0;
+    snprintf(probePath, sizeof(probePath), "%s/probe", exe);
+
+    DIR *d = opendir("/proc");
+    if (!d) return;
+
+    int killed = 0;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        if (e->d_name[0] < '0' || e->d_name[0] > '9') continue;
+        int pid = atoi(e->d_name);
+        if (pid <= 0 || pid == (int)getpid()) continue;
+
+        char path[64], buf[512];
+        snprintf(path, sizeof(path), "/proc/%d/cmdline", pid);
+        FILE *f = fopen(path, "r");
+        if (!f) continue;
+        size_t len = fread(buf, 1, sizeof(buf) - 1, f);
+        fclose(f);
+        if (len == 0) continue;
+        buf[len] = 0;
+        size_t arg0 = strlen(buf);
+
+        /* 还有别的 MaeShare 在主实例状态：什么都不动 */
+        if (strcmp(buf, exe) == 0) { closedir(d); return; }
+        if (strcmp(buf, probePath) != 0 || len <= arg0 + 1) continue;
+        if (strcmp(buf + arg0 + 1, "--serve") != 0) continue;
+
+        if (kill(pid, SIGKILL) == 0) ++killed;
+    }
+    closedir(d);
+    if (killed) qDebug("PROBE_SWEEP killed=%d", killed);
 }
 
 static int previewTabIndex(const QStringList &args) {
@@ -78,9 +169,36 @@ static int previewTabIndex(const QStringList &args) {
 }
 
 int main(int argc, char **argv) {
+    /* 转交时对端读完就关 socket，写第二行会拿到 SIGPIPE；忽略它，改成 ERR/EPIPE 走正常返回 */
+    signal(SIGPIPE, SIG_IGN);
+
+    /* ---- 先做参数扫描与「转交给已运行实例」，不碰 Qt GUI ----
+     * 只有预览/诊断类参数才走完整启动；--share / --open 是正常入口。 */
+    bool earlyDiagnostic = false;
+    const char *earlyShare[64];
+    int earlyShareCount = 0;
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--share") == 0) {
+            for (int j = i + 1; j < argc; ++j) {
+                if (argv[j][0] == '-' && argv[j][1] == '-') break;
+                if (earlyShareCount < 64) earlyShare[earlyShareCount++] = argv[j];
+            }
+        } else if (argv[i][0] == '-' && argv[i][1] == '-') {
+            if (strcmp(argv[i], "--open") != 0) earlyDiagnostic = true;
+        }
+    }
+    if (!earlyDiagnostic && earlyShareCount > 0 &&
+        forwardToRunningInstance(earlyShare, earlyShareCount))
+        return 0;   /* 已转交，立刻退出（毫秒级），不再拉起第二个界面 */
+
     QTextCodec::setCodecForLocale(QTextCodec::codecForName("UTF-8"));
     QTextCodec::setCodecForCStrings(QTextCodec::codecForName("UTF-8"));
     QTextCodec::setCodecForTr(QTextCodec::codecForName("UTF-8"));
+
+    // QLocalServer 的 socket 建在 QDir::tempPath() 下：run-standalone.sh 起的实例是
+    // /var/tmp，从相册 fork 出来的子进程继承到的可能是 /tmp。两边路径不一致就永远连不上，
+    // 各自 listen 变成两个实例（表现为「点 MaeShare 没反应」或冒出第二个窗口）。
+    qputenv("TMPDIR", "/var/tmp");
 
     // N900 的 SGX530 上 Qt 的 opengl 后端可用（日志会打印 Found SGX/MBX driver），
     // 让界面动画走 GPU；出问题可用 MAESHARE_RASTER=1 强制回软件光栅。
@@ -100,16 +218,14 @@ int main(int argc, char **argv) {
         if (args.at(i) == "--qml" && i + 1 < args.size()) qmlPath = args.at(i + 1);
     }
 
-    QDeclarativeView view;
-    view.setWindowTitle("MaeShare");
-    view.setWindowIcon(QIcon(appDir + "/icon.png"));
-    view.setResizeMode(QDeclarativeView::SizeRootObjectToView);
-    view.setBackgroundBrush(QColor("#181A1E"));
-    view.resize(800, 480);
-
+    // 只有「预览/诊断」这类参数才跳过单实例。--share / --open 是正常入口：
+    // 已有实例在跑时要把文件转交过去，而不是再起一个实例（会撞 UDP 端口、两个窗口）。
     bool diagnostic = false;
     for (int i = 0; i < args.size(); ++i) {
-        if (args.at(i).startsWith("--")) diagnostic = true;
+        const QString a = args.at(i);
+        if (!a.startsWith("--")) continue;
+        if (a == "--share" || a == "--open") continue;
+        diagnostic = true;
     }
 
     // 相册分享：--share 后面跟若干个文件绝对路径（libsharing 插件就是这么调的）
@@ -122,6 +238,25 @@ int main(int argc, char **argv) {
         }
         break;
     }
+
+    // 已有实例在跑：连上它、把文件转过去、立刻退出。这里不能建 QDeclarativeView，
+    // 否则会白白拉起一个 QGL 窗口（600MHz 上首帧就要十几秒，看起来就像没反应）。
+    if (!diagnostic) {
+        SingleInstance probe(0, 0);
+        if (probe.connectExisting()) {
+            if (!sharedPaths.isEmpty()) probe.forwardShare(sharedPaths);
+            return 0;
+        }
+    }
+
+    sweepStaleProbe();   // 上一轮崩溃留下的 probe 会占住 UDP 53317，先清掉再启动
+
+    QDeclarativeView view;
+    view.setWindowTitle("MaeShare");
+    view.setWindowIcon(QIcon(appDir + "/icon.png"));
+    view.setResizeMode(QDeclarativeView::SizeRootObjectToView);
+    view.setBackgroundBrush(QColor("#181A1E"));
+    view.resize(800, 480);
 
     Transfer transfer;
     SingleInstance instance(&view, &transfer);
@@ -149,10 +284,17 @@ int main(int argc, char **argv) {
     // 普通窗口：保留 Hildon 原生顶栏与任务切换，可随时切到后台/其他应用
     view.show();
 
+
     // 相册分享进来的文件：在 QML 起来之后写入「已选内容」，发送页会直接列出设备
     if (!sharedPaths.isEmpty()) {
         QMetaObject::invokeMethod(&transfer, "shareFiles", Qt::QueuedConnection,
                                   Q_ARG(QStringList, sharedPaths));
+        // 再补一次直接切页：不依赖 shareReady 信号时序，冷启动也一定落在发送页
+        if (QObject *root = view.rootObject()) {
+            QMetaObject::invokeMethod(root, "goTab", Qt::QueuedConnection,
+                                      Q_ARG(QVariant, QVariant(QString("send"))));
+        }
+        QMetaObject::invokeMethod(&transfer, "scan", Qt::QueuedConnection);
     }
 
     // 切到后台时停掉接收页的波纹动画：Qt Quick 1 的动画是持续重绘整帧，

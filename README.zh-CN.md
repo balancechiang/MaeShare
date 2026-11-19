@@ -6,7 +6,7 @@
 
 **一个面向诺基亚 N900 的 LocalSend 兼容传输应用 —— 带真正的 Maemo 系统集成。**
 
-`Maemo 5 (Fremantle)` · `Nokia N900` · `Qt 4.7 / QML` · `LocalSend 协议` · `v1.0.0`
+`Maemo 5 (Fremantle)` · `Nokia N900` · `Qt 4.7 / QML` · `LocalSend 协议` · `v1.0.1`
 
 [**English README →** `README.md`](README.md)
 
@@ -124,7 +124,7 @@ N900 的相册点 Share 时**不读** `.desktop` 的 MIME 关联，而是由 `sh
 
 ### 打包
 
-打包步骤会先重编插件，再把三件套打进 `.deb`，并生成 `DEBIAN/postinst` / `prerm` 钩子重启 `sharing-manager`（它不监视服务目录）。产物：`maeshare_1.0.0_armel.deb`，包名 `maeshare`。
+打包步骤会先重编插件，再把三件套打进 `.deb`，并生成 `DEBIAN/postinst` / `prerm` 钩子重启 `sharing-manager`（它不监视服务目录）。产物：`maeshare_1.0.1_armel.deb`，包名 `maeshare`。
 
 ---
 
@@ -149,7 +149,7 @@ src/sharing-plugin/   Maemo libsharing 插件：源码、服务 XML、Makefile�
 docs/                 两个 README 用的图标与截图
 ```
 
-这个包**只含源码**。预编译的 `maeshare_1.0.0_armel.deb` 是发布页上的独立附件——只想装到设备上的话，下载那一个即可。
+这个包**只含源码**。预编译的 `maeshare_1.0.1_armel.deb` 是发布页上的独立附件——只想装到设备上的话，下载那一个即可。
 
 ---
 
@@ -160,6 +160,25 @@ docs/                 两个 README 用的图标与截图
 - 分享暂存副本放在 `~/.maeshare-share/`，发送完成或取消时删除；超过 7 天的孤儿副本在启动时清掉（未发出去的副本会保留，不会被误删）。
 - 这台机器的 `sharing-manager` 不由 D-Bus 自动拉起，分享条目生效需要它处于运行状态。
 - 802.11g 下超大文件仍可能被 Wi-Fi 省电打断，「Keep awake」能缓解但不能完全消除。
+
+---
+
+## 设备上的 Qt 4.7 与 CSSU
+
+客户端按**原厂 4.7.0 的 sysroot** 编译，原厂 Qt 与 CSSU 的新版本都能跑。1.0.1 之前包里写的是 `>= 4.7.4`，原厂机因此直接卡在依赖上；现在下限改为 `>= 4.7.0`。
+
+| 手机上的 Qt | 来源 | 说明 |
+|---|---|---|
+| `1:4.7.0~git20100909-0maemo1+0m5` | 原厂 Maemo 5 | 只要 QML 模块在，就能运行 |
+| `1:4.7.4~git20110505+cssu15` | CSSU（`cssu-stable` / `cssu-thumb`） | 本版本实测所用的环境 |
+
+启动时报 `module "QtQuick" is not installed` 时按顺序查：
+
+1. `dpkg -l | grep qt4`——确认 `libqt4-declarative` 已安装，且没有被钉在更旧的版本。
+2. `ls /usr/lib/qt4/imports/QtQuick`——`import QtQuick 1.0` 就在这个目录里找模块；目录为空或不存在，说明 Qt 的 QML 部分不完整。
+3. 从终端启动一次看真实报错：`/usr/bin/run-standalone.sh /opt/maeshare/maeshare`。
+
+`--force-depends` 只是跳过 dpkg 的版本检查，不会补装 QML 运行时；这样强行装上的应用，往往仍会在第一个 `import` 上失败。
 
 ---
 

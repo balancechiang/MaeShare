@@ -374,7 +374,7 @@ public:
     bool autoSave() const { return automatic; }
     QString receiveDirectory() const { return receive; }
     QString pickerMode() const { return pickMode; }
-    QString version() const { return "1.0.0"; }
+    QString version() const { return "1.0.1"; }
     QString language() const { return langTag; }
     QString systemLanguage() const { return QLocale::system().name(); }
 
@@ -769,6 +769,8 @@ public:
         if (stagedShare.isEmpty()) return;
         for (int i = 0; i < stagedShare.size(); ++i) {
             if (QFile::exists(stagedShare.at(i))) QFile::remove(stagedShare.at(i));
+            // 插件把每个分享项放在独立子目录里（为了保留原始文件名），空了就一并收掉
+            QDir().rmdir(QFileInfo(stagedShare.at(i)).absolutePath());
             selection.removeAll(stagedShare.at(i));
         }
         stagedShare.clear();
@@ -794,6 +796,8 @@ public:
         }
         chosen = selection.isEmpty() ? QString() : selection.first();
         emit changed();
+        qDebug("SHARE_INTAKE %d/%d", selection.size(), paths.size());
+        if (!selection.isEmpty()) emit shareReady();   // 让界面自己跳到发送页
     }
 
     Q_INVOKABLE void toggleSelection(QString path) {
@@ -1048,6 +1052,12 @@ public:
         finish(trUtf("设备名称已保存。"));
     }
 
+    // 键盘输入在 N900 上不稳定（SCIM 面板不一定弹），给界面一个「粘贴」入口：
+    // 剪贴板是 X 级共享的，从 Notes/对话里复制中文过来就能直接用。
+    Q_INVOKABLE QString clipboardText() {
+        return QApplication::clipboard()->text().left(4000);
+    }
+
     Q_INVOKABLE void answer(bool accept) {
         if (message.isEmpty()) return;
         decisionTimer.stop();
@@ -1085,6 +1095,7 @@ public slots:
 
 signals:
     void changed();
+    void shareReady();          // 相册分享送来了文件：界面应当切到发送页并列出它们
     void messageArrived();      // 收到一条文本消息，接收页据此把内容直接弹出来
     void feedback(QString text);
     void receiveCompleted();

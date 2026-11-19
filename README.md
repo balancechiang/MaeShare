@@ -6,7 +6,7 @@
 
 **A LocalSend-compatible file transfer app for the Nokia N900 — with real Maemo system integration.**
 
-`Maemo 5 (Fremantle)` · `Nokia N900` · `Qt 4.7 / QML` · `LocalSend protocol` · `v1.0.0`
+`Maemo 5 (Fremantle)` · `Nokia N900` · `Qt 4.7 / QML` · `LocalSend protocol` · `v1.0.1`
 
 [**中文说明 →** `README.zh-CN.md`](README.zh-CN.md)
 
@@ -125,7 +125,7 @@ If an instance is already running, the new process detects it over `QLocalServer
 
 ### Packaging
 
-The packaging step builds the plugin first, then stages all three artifacts into the `.deb`, and ships `DEBIAN/postinst` / `prerm` hooks that restart `sharing-manager` (it does not watch the services directory). Output: `maeshare_1.0.0_armel.deb`, package name `maeshare`.
+The packaging step builds the plugin first, then stages all three artifacts into the `.deb`, and ships `DEBIAN/postinst` / `prerm` hooks that restart `sharing-manager` (it does not watch the services directory). Output: `maeshare_1.0.1_armel.deb`, package name `maeshare`.
 
 ---
 
@@ -150,7 +150,7 @@ src/sharing-plugin/   Maemo libsharing plugin: sources, service XML, Makefile, i
 docs/                 logo + screenshots used by these READMEs
 ```
 
-This archive is **source only**. The prebuilt `maeshare_1.0.0_armel.deb` is a separate
+This archive is **source only**. The prebuilt `maeshare_1.0.1_armel.deb` is a separate
 asset on the release page — download and install that one if you just want the app on a
 device.
 
@@ -163,6 +163,25 @@ device.
 - Staged share copies live in `~/.maeshare-share/` and are removed when the send finishes or is cancelled; orphans older than 7 days are swept at startup (a copy from an unfinished share is therefore kept, not deleted).
 - `sharing-manager` is not D-Bus-activated on this device build, so it must be running for the Share row to work.
 - Very large transfers over 802.11g can still be interrupted by Wi-Fi power saving; "Keep awake" mitigates but does not eliminate it.
+
+---
+
+## Qt 4.7 on the phone, and CSSU
+
+The client is compiled against the **stock 4.7.0 sysroot**, and runs on both the stock Qt and the CSSU builds. Until 1.0.1 the package asked for `>= 4.7.4`, which made `dpkg -i` stop on a stock N900 for no good reason; the floor is now `>= 4.7.0`.
+
+| Qt on the phone | Where it comes from | Notes |
+|---|---|---|
+| `1:4.7.0~git20100909-0maemo1+0m5` | stock Maemo 5 | runs, as long as the QML module is present |
+| `1:4.7.4~git20110505+cssu15` | CSSU (`cssu-stable` / `cssu-thumb`) | the build this release was tested on |
+
+If startup fails with `module "QtQuick" is not installed`:
+
+1. `dpkg -l | grep qt4` — check that `libqt4-declarative` is installed and not pinned to an older version.
+2. `ls /usr/lib/qt4/imports/QtQuick` — `import QtQuick 1.0` resolves against this directory; if it is empty or missing, the QML part of the Qt install is incomplete.
+3. Run the app once from a terminal to see the real error: `/usr/bin/run-standalone.sh /opt/maeshare/maeshare`.
+
+`--force-depends` only skips dpkg's version check; it never installs the QML runtime, so an app forced in that way can still fail on the first `import`.
 
 ---
 

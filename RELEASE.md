@@ -1,36 +1,31 @@
-# MaeShare 1.0.0
+# MaeShare 1.0.1
 
-First public release: a LocalSend-compatible file transfer client for the Nokia N900
-(Maemo 5 / Fremantle), including real integration into the system Share menu.
+A maintenance release on top of 1.0.0: the Send screen is rebuilt, text input behaves
+properly on a real N900, the Share hand-off is fixed for four separate failure cases, and
+the package now installs on a stock Qt 4.7.0 phone.
 
-## Highlights
+## Changes
 
-- **LocalSend protocol over LAN** — works with the official LocalSend clients on
-  Windows, macOS, Linux, Android and iOS (port 53317, HTTPS, text messages supported).
-- **System Share integration** — pick one or more photos or a video in Photos / Image
-  Viewer, tap *Share*, choose MaeShare, and the app opens on its own device picker with
-  the media already selected. Implemented through Maemo's native `libsharing` plugin
-  mechanism (service XML + `libmaeshare.so`), not through `.desktop` MIME handlers.
-- **Receive / Send / Text / History / Settings** — one-tap receive radar, quick save,
-  receive history with *Open folder* / *Clear history*, multi-file sending (20 files),
-  text messages delivered as LocalSend text bubbles.
-- **Manual address entry** — the bullseye icon on the send tab opens an address page for
-  peers that multicast never reaches (blocked or filtered traffic, another subnet): the
-  app probes the typed IPv4, pins the peer's certificate fingerprint and remembers it
-  across restarts. Invalid or non-local addresses are rejected before connecting.
-- **Four UI languages** — English, Simplified Chinese, Traditional Chinese (HK/TW), each
-  following the system locale.
-- **Keep awake during transfers** via MCE `req_display_blanking_pause`; normal screen
-  timeout returns afterwards. The app never rewrites lock-screen settings.
-- **Share staging cleans itself up** — copies made for a system share go to the hidden
-  `~/.maeshare-share/`, are deleted when the send finishes or is cancelled, and anything
-  orphaned is swept after 7 days at startup.
+- **Send screen rebuilt** — the selected content is one summary bar (file name, `1 item`,
+  `Clear` / `Cancel` in the same row); the floating bottom chip is gone, the screen icons
+  are no longer wrapped in their own rounded tiles, and the refresh / manual-address icons
+  sit right after *Nearby devices* again.
+- **Text input and focus** — fields take focus when tapped and when a page opens, so the
+  hardware keyboard and on-screen input land in the right place; the name, manual-address
+  and text-message pages each have a `Paste` button that pulls Chinese text from the X
+  clipboard.
+- **Share hand-off fixes** — staged copies keep their extension (original name → MIME →
+  magic-byte fallback), the selected files finally show up in the picker, a stale
+  `probe --serve` no longer blocks discovery, and sharing from Photos works even when
+  MaeShare is not running.
+- **Qt dependency relaxed** — `Depends` lowered from `>= 4.7.4` to `>= 4.7.0`, so a stock
+  Maemo 5 install no longer stops at `dpkg -i`; see the Qt / CSSU section in `README.md`.
 
 ## Install
 
 ```sh
 # on the device, as root
-dpkg -i maeshare_1.0.0_armel.deb
+dpkg -i maeshare_1.0.1_armel.deb
 ```
 
 The package name is `maeshare`, and it declares `Conflicts` / `Replaces` on the earlier

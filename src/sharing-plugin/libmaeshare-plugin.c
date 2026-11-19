@@ -16,6 +16,13 @@
  *        _account_setup / _account_validate / _edit_account / _update_options
  *   - 依赖只有 libc + libdl，不链接 glib/gtk，交叉编译不需要额外 -dev 包。
  *
+ * 暂存副本的命名（1.0.1 修正）：
+ *   系统交来的是 /home/user/.sharing/outbox/attachment-XXXX —— 本身没有扩展名。
+ *   1.0.0 直接把它当暂存名，发出去的文件因此没后缀。现在用 libsharing 的
+ *   sharing_entry_media_get_filename / _get_mime 取原始名与类型，暂存成
+ *   STAGE_DIR/<pid>-<idx>/<原始文件名>，客户端拿到的 fileName() 就是原文件名。
+ *   取不到原始名时按 MIME 补扩展名，仍取不到才退回 outbox 名字。
+ *
  * 调试日志：/tmp/maeshare-share.log（便于真机排查，正式版可去掉）
  *
  * 源码位置（工程内）：n900/share-int/libmaeshare-plugin.c
@@ -24,6 +31,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>   /* strncasecmp */
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -102,9 +110,26 @@ static void sweep_stage_dir(const char *dir, time_t now)
         snprintf(path, sizeof(path), "%s/%s", dir, e->d_name);
         struct stat st;
         if (stat(path, &st) != 0) continue;
-        if (!S_ISREG(st.st_mode)) continue;
-        if (now - st.st_mtime > STAGE_TTL_SEC) {
-            if (unlink(path) == 0) logmsg("sweep(rm) %s", path);
+        if (S_ISREG(st.st_mode)) {
+            /* 1.0.0 的平铺副本，以及个别退回原路径的残留 */
+            if (now - st.st_mtime > STAGE_TTL_SEC) {
+                if (unlink(path) == 0) logmsg("sweep(rm) %s", path);
+            }
+        } else if (S_ISDIR(st.st_mode)) {
+            /* 每个分享项一个子目录（里面放保留原名的副本），整目录一起清 */
+            DIR *sub = opendir(path);
+            struct dirent *se;
+            char inner[600];
+            if (!sub) continue;
+            while ((se = readdir(sub)) != NULL) {
+                if (se->d_name[0] == '.') continue;
+                if (strlen(path) + strlen(se->d_name) + 2 >= sizeof(inner)) continue;
+                snprintf(inner, sizeof(inner), "%s/%s", path, se->d_name);
+                unlink(inner);
+                logmsg("sweep(rm) %s", inner);
+            }
+            closedir(sub);
+            if (rmdir(path) == 0) logmsg("sweep(rmdir) %s", path);
         }
     }
     closedir(d);
@@ -117,23 +142,162 @@ static void sweep_stage_dirs(void)
     sweep_stage_dir(STAGE_DIR_LEGACY, now);
 }
 
-/* 给第 i 个媒体文件生成稳定副本，返回新路径（失败则返回 NULL，调用方退回原路径） */
-static char *stage_media(const char *src, int idx)
+/* MIME → 扩展名。系统交来的附件名本身不含扩展名（attachment-XXXX），
+ * 拿不到原始文件名时只能靠 MIME 把后缀补回来。 */
+static const char *mime_ext(const char *mime)
+{
+    static const struct { const char *mime; const char *ext; } map[] = {
+        { "image/jpeg", ".jpg" },        { "image/jpg", ".jpg" },
+        { "image/png", ".png" },         { "image/gif", ".gif" },
+        { "image/bmp", ".bmp" },         { "image/webp", ".webp" },
+        { "image/tiff", ".tif" },        { "image/x-portable-pixmap", ".ppm" },
+        { "video/mp4", ".mp4" },         { "video/3gpp", ".3gp" },
+        { "video/x-msvideo", ".avi" },   { "video/quicktime", ".mov" },
+        { "video/mpeg", ".mpg" },
+        { "audio/mpeg", ".mp3" },        { "audio/x-wav", ".wav" },
+        { "audio/amr", ".amr" },         { "audio/aac", ".aac" },
+        { "application/pdf", ".pdf" },   { "text/plain", ".txt" },
+        { "application/zip", ".zip" },
+        { NULL, NULL }
+    };
+    int i;
+    if (!mime || !mime[0]) return NULL;
+    for (i = 0; map[i].mime; ++i) {
+        size_t l = strlen(map[i].mime);
+        if (strncasecmp(mime, map[i].mime, l) == 0) return map[i].ext;
+    }
+    return NULL;
+}
+
+/* 文件名消毒：去掉开头的路径片段与点，危险字符换成 '_'，限长 96
+ * （文件名会经 argv 交给客户端，再由 LocalSend 协议发给对方） */
+static void safe_name(const char *in, char *out, size_t outsz)
+{
+    size_t n = 0, i;
+
+    if (!in) in = "";
+    while (*in == '.' || *in == '/' || *in == '\\') ++in;
+    for (i = 0; in[i] && n + 1 < outsz; ++i) {
+        unsigned char c = (unsigned char)in[i];
+        if (c < 0x20 || c == 0x7f || c == '/' || c == '\\' || c == ':' ||
+            c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|')
+            out[n++] = '_';
+        else
+            out[n++] = (char)c;
+    }
+    out[n] = 0;
+    while (n > 0 && (out[n - 1] == ' ' || out[n - 1] == '\t')) out[--n] = 0;
+}
+
+static int has_ext(const char *name)
+{
+    const char *dot = strrchr(name, '.');
+    return dot && dot != name && dot[1] != 0;
+}
+
+/* 最后一道兜底：文件名和 MIME 都拿不到时按文件头判类型，保证发出去的文件有后缀 */
+static const char *sniff_ext(const char *path)
+{
+    unsigned char b[16];
+    ssize_t n;
+    int fd = open(path, O_RDONLY);
+
+    if (fd < 0) return NULL;
+    n = read(fd, b, sizeof(b));
+    close(fd);
+    if (n < 4) return NULL;
+    if (b[0] == 0xff && b[1] == 0xd8 && b[2] == 0xff) return ".jpg";
+    if (b[0] == 0x89 && b[1] == 'P' && b[2] == 'N' && b[3] == 'G') return ".png";
+    if (b[0] == 'G' && b[1] == 'I' && b[2] == 'F') return ".gif";
+    if (b[0] == 'B' && b[1] == 'M') return ".bmp";
+    if (b[0] == '%' && b[1] == 'P' && b[2] == 'D' && b[3] == 'F') return ".pdf";
+    if (b[0] == 'P' && b[1] == 'K') return ".zip";
+    if (b[0] == 'R' && b[1] == 'I' && b[2] == 'F' && b[3] == 'F' && n >= 12) {
+        if (memcmp(b + 8, "WEBP", 4) == 0) return ".webp";
+        if (memcmp(b + 8, "AVI ", 4) == 0) return ".avi";
+        return ".wav";
+    }
+    if (n >= 12 && memcmp(b + 4, "ftyp", 4) == 0) return ".mp4";
+    if (b[0] == 'I' && b[1] == 'D' && b[2] == '3') return ".mp3";
+    if (b[0] == 0xff && b[1] == 0xfb) return ".mp3";
+    if (b[0] == 0 && b[1] == 0 && b[2] == 0 && (b[3] == 0x18 || b[3] == 0x20)) return ".mp4";
+    return NULL;
+}
+
+/* 给第 i 个媒体文件生成稳定副本，返回新路径（失败则返回 NULL，调用方退回原路径）
+ *
+ * 目录布局：STAGE_DIR/<pid>-<idx>/<原始文件名>
+ * 放进子目录是为了让客户端拿到的 fileName() 就是原始文件名（含扩展名）：
+ * 发送端 LocalSend 元数据里的 fileName 直接取路径 basename，文件名带不带后缀
+ * 完全由这里决定。hint/mime 来自 libsharing 的 media 对象，可能为空。 */
+static char *stage_media(const char *src, int idx, const char *hint, const char *mime,
+                         char **used, int *used_n)
 {
     const char *base = strrchr(src, '/');
+    char name[128];
+    char dir[512];
+    char *dst;
+
     base = base ? base + 1 : src;
 
-    char *dst = (char *)malloc(strlen(STAGE_DIR) + strlen(base) + 24);
-    if (!dst) return NULL;
-    sprintf(dst, "%s/%d-%d-%s", STAGE_DIR, (int)getpid(), idx, base);
+    safe_name(hint && hint[0] ? hint : base, name, sizeof(name));
+    if (!has_ext(name)) {
+        const char *ext = mime_ext(mime);
+        size_t len = strlen(name);
+        if (!ext) ext = sniff_ext(src);   /* MIME 也没有时按文件头兜底 */
+        if (ext && len + strlen(ext) + 1 < sizeof(name)) strcat(name, ext);
+    }
+    if (!name[0]) strcpy(name, "file");
 
-    mkdir(STAGE_DIR, 0700); /* 已存在时返回 EEXIST，忽略即可 */
+    /* 同一批里重名时加序号：发送端会拒绝同名文件 */
+    {
+        const char *dot = strrchr(name, '.');
+        char stem[128];
+        char ext[16];
+        size_t sl;
+        int n = 2, k, dup = 1;
+
+        /* ext 必须单独拷一份：直接从 name 里取子串再写回 name 是重叠拷贝 */
+        ext[0] = 0;
+        if (dot && dot != name && dot[1]) {
+            snprintf(ext, sizeof(ext), "%s", dot);
+            sl = (size_t)(dot - name);
+        } else {
+            sl = strlen(name);
+        }
+        if (sl >= sizeof(stem)) sl = sizeof(stem) - 1;
+        memcpy(stem, name, sl);
+        stem[sl] = 0;
+
+        while (dup && n < 100) {
+            dup = 0;
+            for (k = 0; k < *used_n; ++k)
+                if (strcmp(used[k], name) == 0) { dup = 1; break; }
+            if (dup) snprintf(name, sizeof(name), "%s-%d%s", stem, n++, ext);
+        }
+    }
+
+    snprintf(dir, sizeof(dir), "%s/%d-%d", STAGE_DIR, (int)getpid(), idx);
+    if (mkdir(STAGE_DIR, 0700) != 0 && errno != EEXIST)
+        logmsg("stage(mkdir) %s : %s", STAGE_DIR, strerror(errno));
+    if (mkdir(dir, 0700) != 0 && errno != EEXIST)
+        logmsg("stage(mkdir) %s : %s", dir, strerror(errno));
+
+    dst = (char *)malloc(strlen(dir) + strlen(name) + 2);
+    if (!dst) return NULL;
+    sprintf(dst, "%s/%s", dir, name);
+
     if (copy_file(src, dst) != 0) {
         logmsg("stage(fail) %s -> %s : %s", src, dst, strerror(errno));
         free(dst);
         return NULL;
     }
-    logmsg("stage(ok) %s", dst);
+    if (*used_n < MAX_MEDIA) {
+        used[*used_n] = strdup(name);
+        if (used[*used_n]) ++(*used_n);
+    }
+    logmsg("stage(ok) %s (name=%s hint=%s mime=%s)", dst, name,
+           (hint && hint[0]) ? hint : "-", (mime && mime[0]) ? mime : "-");
     return dst;
 }
 
@@ -154,28 +318,45 @@ static void *sym(const char *name)
  *     /opt/maeshare/maeshare --share <path1> <path2> ...
  * 返回 0 表示已 fork 成功（不阻塞分享面板）。
  */
-static int launch_app(char **paths, int count)
+static int launch_app(char **paths, char **names, char **mimes, int count)
 {
     char *argv[MAX_MEDIA + 4];
     char *staged[MAX_MEDIA];
+    char *used[MAX_MEDIA];
+    int used_n = 0;
     int i, n = 0, staged_count = 0;
 
     /* 先把系统给的临时文件拷成稳定副本（send 返回后 outbox 里的原件会被删掉） */
     sweep_stage_dirs();   /* 顺手清掉上次留下的孤儿副本 */
     for (i = 0; i < count && i < MAX_MEDIA; ++i) {
-        staged[i] = stage_media(paths[i], i);
+        staged[i] = stage_media(paths[i], i,
+                                names ? names[i] : NULL,
+                                mimes ? mimes[i] : NULL,
+                                used, &used_n);
         if (staged[i]) ++staged_count;
     }
 
+    /* Maemo 5 的程序必须经 run-standalone.sh 启动：直接 exec 二进制会被
+       libhildon 判定为非法调用（打印 "must be run with the run-standalone.sh script!"
+       后立刻退出），相册里点分享就会"没反应"。 */
+    const char *runner = "/usr/bin/run-standalone.sh";
+    if (access(runner, X_OK) == 0) argv[n++] = (char *)runner;
     argv[n++] = (char *)APP_PATH;
     argv[n++] = (char *)"--share";
-    for (i = 0; i < count && i < MAX_MEDIA; ++i)
-        argv[n++] = staged[i] ? staged[i] : paths[i];
-    argv[n] = NULL;
+    {
+        int first_path = n;
+        for (i = 0; i < count && i < MAX_MEDIA; ++i) {
+            char *src = staged[i] ? staged[i] : paths[i];
+            if (!src || src[0] != '/') continue;      /* 空路径绝不往下传：会让界面切过去却什么都没有 */
+            argv[n++] = src;
+        }
+        argv[n] = NULL;
 
-    logmsg("launch(begin) count=%d staged=%d exe=%s", count, staged_count, APP_PATH);
-    for (i = 0; i < count; ++i)
-        logmsg("  path[%d]=%s", i, argv[2 + i]);
+        logmsg("launch(begin) count=%d staged=%d exe=%s runner=%s", count, staged_count, APP_PATH,
+               runner == argv[0] ? runner : "-");
+        for (i = 0; i < count; ++i)
+            logmsg("  path[%d]=%s", i, argv[first_path + i]);
+    }
 
     if (access(APP_PATH, X_OK) != 0) {
         logmsg("launch(fail) %s not executable: %s", APP_PATH, strerror(errno));
@@ -240,9 +421,12 @@ int sharing_plugin_interface_send(void *transfer, void *connection, void *dead_m
     void *(*get_entry)(void *) = (void *(*)(void *))sym("sharing_transfer_get_entry");
     void *(*entry_get_media)(void *) = (void *(*)(void *))sym("sharing_entry_get_media");
     char *(*media_localpath)(void *) = (char *(*)(void *))sym("sharing_entry_media_get_localpath");
+    /* 这两项用来把原始文件名 / 类型带进暂存副本：系统的 outbox 文件名没有后缀 */
+    char *(*media_filename)(void *) = (char *(*)(void *))sym("sharing_entry_media_get_filename");
+    char *(*media_mime)(void *) = (char *(*)(void *))sym("sharing_entry_media_get_mime");
 
-    logmsg("send transfer=%p entry_fn=%p media_fn=%p path_fn=%p",
-           transfer, get_entry, entry_get_media, media_localpath);
+    logmsg("send transfer=%p entry_fn=%p media_fn=%p path_fn=%p name_fn=%p mime_fn=%p",
+           transfer, get_entry, entry_get_media, media_localpath, media_filename, media_mime);
 
     if (!transfer || !get_entry || !entry_get_media || !media_localpath) {
         logmsg("send(fail) missing sharing symbols");
@@ -260,15 +444,25 @@ int sharing_plugin_interface_send(void *transfer, void *connection, void *dead_m
     GList *it = (GList *)entry_get_media(entry);
 
     char *paths[MAX_MEDIA];
+    char *names[MAX_MEDIA];
+    char *mimes[MAX_MEDIA];
     int count = 0;
     while (it && count < MAX_MEDIA) {
         char *p = media_localpath(it->data);
-        if (p && p[0] == '/') paths[count++] = p;
+        if (p && p[0] == '/') {
+            paths[count] = p;                       /* 必须存下来：launch_app 全靠它 */
+            names[count] = media_filename ? media_filename(it->data) : NULL;
+            mimes[count] = media_mime ? media_mime(it->data) : NULL;
+            logmsg("  media[%d] name=%s mime=%s path=%s", count,
+                   (names[count] && names[count][0]) ? names[count] : "-",
+                   (mimes[count] && mimes[count][0]) ? mimes[count] : "-", p);
+            ++count;
+        }
         it = it->next;
     }
 
     logmsg("send collected %d media", count);
-    if (count > 0) launch_app(paths, count);
+    if (count > 0) launch_app(paths, names, mimes, count);
 
     return SEND_RESULT_SUCCESS;
 }
@@ -381,7 +575,7 @@ int maeshare_selftest_launch(const char *csv)
     char *tok = strtok_r(buf, ":", &save);
     while (tok && count < MAX_MEDIA) { paths[count++] = tok; tok = strtok_r(NULL, ":", &save); }
     logmsg("selftest count=%d", count);
-    int r = count ? launch_app(paths, count) : -1;
+    int r = count ? launch_app(paths, NULL, NULL, count) : -1;
     free(buf);
     return r;
 }
