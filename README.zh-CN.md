@@ -6,7 +6,7 @@
 
 **一个面向诺基亚 N900 的 LocalSend 兼容传输应用 —— 带真正的 Maemo 系统集成。**
 
-`Maemo 5 (Fremantle)` · `Nokia N900` · `Qt 4.7 / QML` · `LocalSend 协议` · `v1.0.1`
+`Maemo 5 (Fremantle)` · `Nokia N900` · `Qt 4.7 / QML` · `LocalSend 协议` · `v1.0.2`
 
 [**English README →** `README.md`](README.md)
 
@@ -124,7 +124,7 @@ N900 的相册点 Share 时**不读** `.desktop` 的 MIME 关联，而是由 `sh
 
 ### 打包
 
-打包步骤会先重编插件，再把三件套打进 `.deb`，并生成 `DEBIAN/postinst` / `prerm` 钩子重启 `sharing-manager`（它不监视服务目录）。产物：`maeshare_1.0.1_armel.deb`，包名 `maeshare`。
+打包步骤会先重编插件，再把三件套打进 `.deb`，并生成 `DEBIAN/postinst` / `prerm` 钩子重启 `sharing-manager`（它不监视服务目录）。产物：`maeshare_1.0.2_armel.deb`，包名 `maeshare`。
 
 ---
 
@@ -149,7 +149,7 @@ src/sharing-plugin/   Maemo libsharing 插件：源码、服务 XML、Makefile�
 docs/                 两个 README 用的图标与截图
 ```
 
-这个包**只含源码**。预编译的 `maeshare_1.0.1_armel.deb` 是发布页上的独立附件——只想装到设备上的话，下载那一个即可。
+这个包**只含源码**。预编译的 `maeshare_1.0.2_armel.deb` 是发布页上的独立附件——只想装到设备上的话，下载那一个即可。
 
 ---
 
@@ -165,21 +165,22 @@ docs/                 两个 README 用的图标与截图
 
 ## 设备上的 Qt 4.7 与 CSSU
 
-客户端按**原厂 4.7.0 的 sysroot** 编译，原厂 Qt 与 CSSU 的新版本都能跑。1.0.1 之前包里写的是 `>= 4.7.4`，原厂机因此直接卡在依赖上；现在下限改为 `>= 4.7.0`。
+Maemo 5 上有两代 Qt 4.7，它们的 QML 命名空间不一样：
 
-| 手机上的 Qt | 来源 | 说明 |
-|---|---|---|
-| `1:4.7.0~git20100909-0maemo1+0m5` | 原厂 Maemo 5 | 只要 QML 模块在，就能运行 |
-| `1:4.7.4~git20110505+cssu15` | CSSU（`cssu-stable` / `cssu-thumb`） | 本版本实测所用的环境 |
+| 手机上的 Qt | 来源 | QML 的 import | `QtQuick` 模块 |
+|---|---|---|---|
+| `1:4.7.0~git20100909-0maemo1+0m5` | 原厂 Maemo 5（PR1.3） | `import Qt 4.7` | 没有 |
+| `1:4.7.4~git20110505+cssu15` | CSSU（`cssu-stable` / `cssu-thumb`） | `import QtQuick 1.0` | 有 |
 
-启动时报 `module "QtQuick" is not installed` 时按顺序查：
+`QtQuick` 是 4.7.1 才独立出来的模块，4.7.0 里同一批类型放在 `Qt` 命名空间下，所以一套 QML 喂不饱两边。1.0.2 起包里装了两套：根目录的 `Main.qml` 给 QtQuick，`qml47/Main.qml` 给 `import Qt 4.7`，程序按 `qVersion()` 自己挑。`qml47` 这套还没在原厂机上验证过，有问题请回报。
 
-1. `dpkg -l | grep qt4`——确认 `libqt4-declarative` 已安装，且没有被钉在更旧的版本。
-2. `ls /usr/lib/qt4/imports/QtQuick`——`import QtQuick 1.0` 就在这个目录里找模块；目录为空或不存在，说明 Qt 的 QML 部分不完整。
+依赖也不再钉版本号：现在是朴素的 `libqt4-declarative, libqt4-gui, libqt4-network, libqt4-core, libqt4-svg`。原因是 Debian 的版本序里 `4.7.0~git…` **小于** `4.7.0`（`~` 表示“排在任何东西之前”），上一版写 `>= 4.7.0` 就等于在原厂机上直接拒绝配置——哪怕装着的正是 4.7.0。
+
+启动时报 `module "QtQuick" is not installed` 时：
+
+1. `dpkg -l | grep qt4`——看清装的是哪一版：`+0m5` 是原厂，`+cssu15` 是 CSSU。
+2. `ls /usr/lib/qt4/imports/`——CSSU 上同样没有 `QtQuick` 目录（类型是编进 `libqt4-declarative` 的），这个列表只能说明存在哪些命名空间。
 3. 从终端启动一次看真实报错：`/usr/bin/run-standalone.sh /opt/maeshare/maeshare`。
-
-`--force-depends` 只是跳过 dpkg 的版本检查，不会补装 QML 运行时；这样强行装上的应用，往往仍会在第一个 `import` 上失败。
-
 ---
 
 ## 致谢

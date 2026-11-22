@@ -6,7 +6,7 @@
 
 **A LocalSend-compatible file transfer app for the Nokia N900 — with real Maemo system integration.**
 
-`Maemo 5 (Fremantle)` · `Nokia N900` · `Qt 4.7 / QML` · `LocalSend protocol` · `v1.0.1`
+`Maemo 5 (Fremantle)` · `Nokia N900` · `Qt 4.7 / QML` · `LocalSend protocol` · `v1.0.2`
 
 [**中文说明 →** `README.zh-CN.md`](README.zh-CN.md)
 
@@ -125,7 +125,7 @@ If an instance is already running, the new process detects it over `QLocalServer
 
 ### Packaging
 
-The packaging step builds the plugin first, then stages all three artifacts into the `.deb`, and ships `DEBIAN/postinst` / `prerm` hooks that restart `sharing-manager` (it does not watch the services directory). Output: `maeshare_1.0.1_armel.deb`, package name `maeshare`.
+The packaging step builds the plugin first, then stages all three artifacts into the `.deb`, and ships `DEBIAN/postinst` / `prerm` hooks that restart `sharing-manager` (it does not watch the services directory). Output: `maeshare_1.0.2_armel.deb`, package name `maeshare`.
 
 ---
 
@@ -150,7 +150,7 @@ src/sharing-plugin/   Maemo libsharing plugin: sources, service XML, Makefile, i
 docs/                 logo + screenshots used by these READMEs
 ```
 
-This archive is **source only**. The prebuilt `maeshare_1.0.1_armel.deb` is a separate
+This archive is **source only**. The prebuilt `maeshare_1.0.2_armel.deb` is a separate
 asset on the release page — download and install that one if you just want the app on a
 device.
 
@@ -168,21 +168,22 @@ device.
 
 ## Qt 4.7 on the phone, and CSSU
 
-The client is compiled against the **stock 4.7.0 sysroot**, and runs on both the stock Qt and the CSSU builds. Until 1.0.1 the package asked for `>= 4.7.4`, which made `dpkg -i` stop on a stock N900 for no good reason; the floor is now `>= 4.7.0`.
+Maemo 5 has two Qt 4.7 line-ups, and they do not share a QML namespace:
 
-| Qt on the phone | Where it comes from | Notes |
-|---|---|---|
-| `1:4.7.0~git20100909-0maemo1+0m5` | stock Maemo 5 | runs, as long as the QML module is present |
-| `1:4.7.4~git20110505+cssu15` | CSSU (`cssu-stable` / `cssu-thumb`) | the build this release was tested on |
+| Qt on the phone | Where it comes from | QML import | `QtQuick` module |
+|---|---|---|---|
+| `1:4.7.0~git20100909-0maemo1+0m5` | stock Maemo 5 (PR1.3) | `import Qt 4.7` | none |
+| `1:4.7.4~git20110505+cssu15` | CSSU (`cssu-stable` / `cssu-thumb`) | `import QtQuick 1.0` | yes |
+
+`QtQuick` only became its own module in 4.7.1; on 4.7.0 the same types live in the `Qt` namespace, so one QML file cannot serve both. Since 1.0.2 the package ships two trees — `Main.qml` (QtQuick) and `qml47/Main.qml` (`import Qt 4.7`) — and the binary picks one from `qVersion()`. The `qml47` tree is untested on a real stock device: report anything that misbehaves.
+
+The package also no longer pins a Qt version. `Depends` is now plain `libqt4-declarative, libqt4-gui, libqt4-network, libqt4-core, libqt4-svg`, because Maemo's `4.7.0~git...` sorts **below** `4.7.0` in Debian order (`~` means "before anything"), so the old `>= 4.7.0` bound made `dpkg -i` refuse to configure on a stock device even though 4.7.0 was installed.
 
 If startup fails with `module "QtQuick" is not installed`:
 
-1. `dpkg -l | grep qt4` — check that `libqt4-declarative` is installed and not pinned to an older version.
-2. `ls /usr/lib/qt4/imports/QtQuick` — `import QtQuick 1.0` resolves against this directory; if it is empty or missing, the QML part of the Qt install is incomplete.
-3. Run the app once from a terminal to see the real error: `/usr/bin/run-standalone.sh /opt/maeshare/maeshare`.
-
-`--force-depends` only skips dpkg's version check; it never installs the QML runtime, so an app forced in that way can still fail on the first `import`.
-
+1. `dpkg -l | grep qt4` — see which build you have: `+0m5` is stock, `+cssu15` is CSSU.
+2. `ls /usr/lib/qt4/imports/` — on CSSU there is no `QtQuick` directory either (the types are compiled into `libqt4-declarative`); the directory listing only tells you which namespaces exist.
+3. Run the app once from a terminal to read the real error: `/usr/bin/run-standalone.sh /opt/maeshare/maeshare`.
 ---
 
 ## Credits & thanks

@@ -218,6 +218,17 @@ int main(int argc, char **argv) {
         if (args.at(i) == "--qml" && i + 1 < args.size()) qmlPath = args.at(i + 1);
     }
 
+    // Qt 4.7.0（原厂 Maemo 5）没有 QtQuick 模块，QML 里只能写 `import Qt 4.7`；
+    // `import QtQuick 1.0` 是 4.7.1 之后才有的命名空间（CSSU 4.7.4 就是这种）。
+    // 包里因此装了两套 QML：qml47/ 给原厂 4.7.0，主目录给 CSSU。这里按 Qt 版本挑。
+    if (qmlPath == appDir + "/Main.qml") {
+        int maj = 0, min = 0, pat = 0;
+        sscanf(qVersion(), "%d.%d.%d", &maj, &min, &pat);
+        const bool legacy = (maj == 4 && (min <= 6 || (min == 7 && pat == 0)));
+        const QString legacyQml = appDir + "/qml47/Main.qml";
+        if (legacy && QFile::exists(legacyQml)) qmlPath = legacyQml;
+    }
+
     // 只有「预览/诊断」这类参数才跳过单实例。--share / --open 是正常入口：
     // 已有实例在跑时要把文件转交过去，而不是再起一个实例（会撞 UDP 端口、两个窗口）。
     bool diagnostic = false;
