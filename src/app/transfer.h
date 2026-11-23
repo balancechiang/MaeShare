@@ -374,7 +374,7 @@ public:
     bool autoSave() const { return automatic; }
     QString receiveDirectory() const { return receive; }
     QString pickerMode() const { return pickMode; }
-    QString version() const { return "1.0.2"; }
+    QString version() const { return "1.0.3"; }
     QString language() const { return langTag; }
     QString systemLanguage() const { return QLocale::system().name(); }
 

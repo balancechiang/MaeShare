@@ -6,7 +6,7 @@
 
 **A LocalSend-compatible file transfer app for the Nokia N900 — with real Maemo system integration.**
 
-`Maemo 5 (Fremantle)` · `Nokia N900` · `Qt 4.7 / QML` · `LocalSend protocol` · `v1.0.2`
+`Maemo 5 (Fremantle)` · `Nokia N900` · `Qt 4.7 / QML` · `LocalSend protocol` · `v1.0.3`
 
 [**中文说明 →** `README.zh-CN.md`](README.zh-CN.md)
 
@@ -125,7 +125,7 @@ If an instance is already running, the new process detects it over `QLocalServer
 
 ### Packaging
 
-The packaging step builds the plugin first, then stages all three artifacts into the `.deb`, and ships `DEBIAN/postinst` / `prerm` hooks that restart `sharing-manager` (it does not watch the services directory). Output: `maeshare_1.0.2_armel.deb`, package name `maeshare`.
+The packaging step builds the plugin first, then stages all three artifacts into the `.deb`, and ships `DEBIAN/postinst` / `prerm` hooks that restart `sharing-manager` (it does not watch the services directory). Output: `maeshare_1.0.3_armel.deb`, package name `maeshare`.
 
 ---
 
@@ -150,7 +150,7 @@ src/sharing-plugin/   Maemo libsharing plugin: sources, service XML, Makefile, i
 docs/                 logo + screenshots used by these READMEs
 ```
 
-This archive is **source only**. The prebuilt `maeshare_1.0.2_armel.deb` is a separate
+This archive is **source only**. The prebuilt `maeshare_1.0.3_armel.deb` is a separate
 asset on the release page — download and install that one if you just want the app on a
 device.
 

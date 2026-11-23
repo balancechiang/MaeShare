@@ -849,7 +849,7 @@ Rectangle {
                 radius: 16
                 smooth: true
                 color: "#22262B"
-                visible: transfer.selectedCount === 0 && !transfer.busy && previewTab !== 21
+                visible: false   // 设备列表不再藏在“先选内容”后面
 
                 Text {
                     anchors.centerIn: parent
@@ -866,7 +866,7 @@ Rectangle {
                 x: 0
                 y: 252
                 width: parent.width
-                visible: transfer.selectedCount > 0 && transfer.devices.length === 0
+                visible: !transfer.busy && transfer.devices.length === 0 && previewTab !== 21
                 horizontalAlignment: Text.AlignHCenter
                 text: app.tx("send_empty")
                 color: app.textMuted
@@ -882,7 +882,7 @@ Rectangle {
                 height: parent.height - 246
                 clip: true
                 spacing: 8
-                visible: transfer.selectedCount > 0 || previewTab === 21
+                visible: !transfer.busy || previewTab === 21
                 model: previewTab === 21 ? app.fakeDevices : transfer.devices
 
                 delegate: Rectangle {

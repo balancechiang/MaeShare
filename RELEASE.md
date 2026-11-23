@@ -1,3 +1,3 @@
-- **Stock Qt 4.7.0**: installs again on a stock PR1.3 device — Qt deps are no longer pinned, and a second QML tree (`qml47/`) is picked automatically so the app also runs there.
-- **README**: the Qt / CSSU section rewritten to match what the package actually does.
-- **Everything else**: unchanged from 1.0.1.
+- **Discovery**: announcements now burst at 100 ms / 500 ms / 2 s and repeat every 8 s from one socket per network interface, and a unicast `/24` register sweep runs every 20 s — peers show up even when the AP drops multicast.
+- **Send page**: the nearby-device list is rendered right away; picking files, photos or text only unlocks sending.
+- **Faster handshake**: the helper is built with `-O2`, which pulls the N900's HTTPS handshake down under LocalSend's 500 ms register timeout.

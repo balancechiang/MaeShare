@@ -6,7 +6,7 @@
 
 **一个面向诺基亚 N900 的 LocalSend 兼容传输应用 —— 带真正的 Maemo 系统集成。**
 
-`Maemo 5 (Fremantle)` · `Nokia N900` · `Qt 4.7 / QML` · `LocalSend 协议` · `v1.0.2`
+`Maemo 5 (Fremantle)` · `Nokia N900` · `Qt 4.7 / QML` · `LocalSend 协议` · `v1.0.3`
 
 [**English README →** `README.md`](README.md)
 
@@ -124,7 +124,7 @@ N900 的相册点 Share 时**不读** `.desktop` 的 MIME 关联，而是由 `sh
 
 ### 打包
 
-打包步骤会先重编插件，再把三件套打进 `.deb`，并生成 `DEBIAN/postinst` / `prerm` 钩子重启 `sharing-manager`（它不监视服务目录）。产物：`maeshare_1.0.2_armel.deb`，包名 `maeshare`。
+打包步骤会先重编插件，再把三件套打进 `.deb`，并生成 `DEBIAN/postinst` / `prerm` 钩子重启 `sharing-manager`（它不监视服务目录）。产物：`maeshare_1.0.3_armel.deb`，包名 `maeshare`。
 
 ---
 
@@ -149,7 +149,7 @@ src/sharing-plugin/   Maemo libsharing 插件：源码、服务 XML、Makefile�
 docs/                 两个 README 用的图标与截图
 ```
 
-这个包**只含源码**。预编译的 `maeshare_1.0.2_armel.deb` 是发布页上的独立附件——只想装到设备上的话，下载那一个即可。
+这个包**只含源码**。预编译的 `maeshare_1.0.3_armel.deb` 是发布页上的独立附件——只想装到设备上的话，下载那一个即可。
 
 ---
 
